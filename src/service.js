@@ -4,9 +4,7 @@ const morgan = require("morgan");
 const express = require("express");
 const rateLimit = require("express-rate-limit");
 const yaml = require("yaml");
-//const bodyParser = require("body-parser");
-//const morgan = require("morgan");
-//const cors = require("cors");
+var qrCode = require("qrcode");
 
 console.log("Starting hwidx-router service...");
 
@@ -36,49 +34,73 @@ function sanitizeInput(input) {
     if( input === null || input === undefined || input === "" )
         return null;
     
-    return `${input}`.toUpperCase().replaceAll(/[/\\]/g, '');
+    return `${input}`.toLowerCase().replaceAll(/[/\\]/g, '');
 }
 
 app.get("/:prefix/:suffix", async (req, res, next) => {
-    const prefixBlocks = req.params.prefix.split(".");
+  const prefixBlocks = req.params.prefix.split(".");
 
-    const org = sanitizeInput(prefixBlocks.shift());
-    const partition = sanitizeInput(prefixBlocks.join("."));
-    const suffix = sanitizeInput(req.params.suffix);
+  const org = sanitizeInput(prefixBlocks.shift());
+  const partition = sanitizeInput(prefixBlocks.join("."));
+  const suffix = sanitizeInput(req.params.suffix);
+  const reqType = req.host.split(".")[0].toLowerCase();
 
-    // Require all three components, othrwise bail immediately
-    if (org === null || partition === null || suffix === null)
-      return res.sendStatus(400);
+  // Require all three components, othrwise bail immediately
+  if (org === null || partition === null || suffix === null)
+    return res.sendStatus(400);
 
-    const webPath = `https://m.hwidx.org/${org}.${partition}/${suffix}`;;
-    const dataPath = path.join(CONFIG_ROOT, org, partition, `${suffix}.yml`);
+  const thisPath = `https://hwidx.org/${org}.${partition}/${suffix}`;
+  const webPath = `https://m.hwidx.org/${org}.${partition}/${suffix}`;
+  const dataPath = path.join(CONFIG_ROOT, org, partition, `${suffix}.yml`);
 
-    if (!fs.existsSync(dataPath)) {
-        if( DEBUG )
-            console.log( `Cannot route request for hwidx://${org}.${partition}/${suffix} -> ???` );
-        return res.sendStatus(404);
-    }
+  if (!fs.existsSync(dataPath)) {
+    if (DEBUG)
+      console.log(
+        `Cannot route request for hwidx://${org}.${partition}/${suffix} -> ???`
+      );
+    return res.sendStatus(404);
+  }
 
-    try {
-        const data = yaml.parse(fs.readFileSync( dataPath, 'utf8' ));
-        if( data === null || data === undefined )
-            return res.sendStatus(500);
-    
-        const redirect = data.url || null;
-        if( redirect !== null ) {
-            if (DEBUG)
-              console.log( `Routing request for hwidx://${org}.${partition}/${suffix} -> ${dataPath} -> ${redirect}` );
-            return res.redirect(302, redirect);
-        }
+  try {
+    const data = yaml.parse(fs.readFileSync(dataPath, "utf8"));
+    if (data === null || data === undefined) return res.sendStatus(500);
 
+    const redirect = data.url || null;
+    if (redirect !== null) {
+      if (reqType == "qr") {
         if (DEBUG)
-          console.log( `Routing request for hwidx://${org}.${partition}/${suffix} -> ${dataPath} -> ${webPath}` );
-        return res.redirect(302, webPath);
+          console.log(
+            `QR code request for hwidx://${org}.${partition}/${suffix} -> ${dataPath} -> ${redirect}`
+          );
+        return qrCode.toDataURL(
+          thisPath,
+          {
+            type: "image/png",
+          },
+          function (err, url) {
+            res
+              .status(200)
+              .send(`<img src="${url}" alt="QR Code for ${redirect}">`);
+          }
+        );
+      }
+
+      if (DEBUG)
+        console.log(
+          `Routing request for hwidx://${org}.${partition}/${suffix} -> ${dataPath} -> ${redirect}`
+        );
+      return res.redirect(302, redirect);
     }
-    catch (err) {
-        console.error( `Error reading file at ${dataPath}:`, err );
-        return res.sendStatus(500);
-    }
+
+    if (DEBUG)
+      console.log(
+        `Routing request for hwidx://${org}.${partition}/${suffix} -> ${dataPath} -> ${webPath}`
+      );
+    return res.redirect(302, webPath);
+  } catch (err) {
+    console.error(`Error reading file at ${dataPath}:`, err);
+    return res.sendStatus(500);
+  }
 });
 
 app.get( "/status", (req, res) => {
@@ -89,9 +111,19 @@ app.use(async function(req, res){
     return res.status(404).send('Not Found');
 });
 
-app.listen(PORT, () => {
+const server = app.listen(PORT, () => {
   console.log(`hwidx-router service is running on port ${PORT}`);
 });
 
+function gracefulClose() {
+  console.log("hwidx-router stopping...");
+  server.close();
 
-console.log("hwidx-router stopped");
+  console.log("hwidx-router stopped");
+  process.exit( 0 );
+}
+
+process.on("SIGINT", gracefulClose);
+process.on("SIGTERM", gracefulClose);
+
+

@@ -7,5 +7,6 @@ services:
     environment:
       - NODE_ENV=production
     volumes:
-      - ./config:/hwidx/config:ro
+      #- ./config:/hwidx/config:ro
+      - ../hwidx:/hwidx/config:ro
     restart: unless-stopped
