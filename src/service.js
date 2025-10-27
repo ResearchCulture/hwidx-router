@@ -4,13 +4,12 @@ const morgan = require("morgan");
 const express = require("express");
 const rateLimit = require("express-rate-limit");
 const yaml = require("yaml");
-var qrCode = require("qrcode");
 
 console.log("Starting hwidx-router service...");
 
 const app = express();
 const PORT = process.env.PORT || 8080;
-const CONFIG_ROOT = process.env.CONFIG_ROOT || "config";
+const CONFIG_ROOT = process.env.CONFIG_ROOT || "config/hwidx";
 const DEBUG = process.env.DEBUG || false;
 
 // Configure request logging via 'morgan'
@@ -38,25 +37,21 @@ function sanitizeInput(input) {
 }
 
 app.get("/:prefix/:suffix", async (req, res, next) => {
-  const prefixBlocks = req.params.prefix.split(".");
-
-  const org = sanitizeInput(prefixBlocks.shift());
-  const partition = sanitizeInput(prefixBlocks.join("."));
+  const org = sanitizeInput(req.params.prefix);
   const suffix = sanitizeInput(req.params.suffix);
-  const reqType = req.host.split(".")[0].toLowerCase();
 
   // Require all three components, othrwise bail immediately
-  if (org === null || partition === null || suffix === null)
+  if (org === null || suffix === null)
     return res.sendStatus(400);
 
-  const thisPath = `https://hwidx.org/${org}.${partition}/${suffix}`;
-  const webPath = `https://m.hwidx.org/${org}.${partition}/${suffix}`;
-  const dataPath = path.join(CONFIG_ROOT, org, partition, `${suffix}.yml`);
+  const thisPath = `https://hwidx.org/${org}/${suffix}`;
+  const webPath = `https://m.hwidx.org/${org}/${suffix}`;
+  const dataPath = path.join(CONFIG_ROOT, org, `${suffix}.yml`);
 
   if (!fs.existsSync(dataPath)) {
     if (DEBUG)
       console.log(
-        `Cannot route request for hwidx://${org}.${partition}/${suffix} -> ???`
+        `Cannot route request for hwidx://${org}/${suffix} -> ???`
       );
     return res.sendStatus(404);
   }
@@ -65,36 +60,21 @@ app.get("/:prefix/:suffix", async (req, res, next) => {
     const data = yaml.parse(fs.readFileSync(dataPath, "utf8"));
     if (data === null || data === undefined) return res.sendStatus(500);
 
+    if( data.status && data.status.toLowerCase() == "pending" )
+      return res.redirect(302, webPath);
+
     const redirect = data.url || null;
     if (redirect !== null) {
-      if (reqType == "qr") {
-        if (DEBUG)
-          console.log(
-            `QR code request for hwidx://${org}.${partition}/${suffix} -> ${dataPath} -> ${redirect}`
-          );
-        return qrCode.toDataURL(
-          thisPath,
-          {
-            type: "image/png",
-          },
-          function (err, url) {
-            res
-              .status(200)
-              .send(`<img src="${url}" alt="QR Code for ${redirect}">`);
-          }
-        );
-      }
-
       if (DEBUG)
         console.log(
-          `Routing request for hwidx://${org}.${partition}/${suffix} -> ${dataPath} -> ${redirect}`
+          `Routing request for hwidx://${org}/${suffix} -> ${dataPath} -> ${redirect}`
         );
       return res.redirect(302, redirect);
     }
 
     if (DEBUG)
       console.log(
-        `Routing request for hwidx://${org}.${partition}/${suffix} -> ${dataPath} -> ${webPath}`
+        `Routing request for hwidx://${org}/${suffix} -> ${dataPath} -> ${webPath}`
       );
     return res.redirect(302, webPath);
   } catch (err) {
