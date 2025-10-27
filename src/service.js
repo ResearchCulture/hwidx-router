@@ -9,7 +9,7 @@ console.log("Starting hwidx-router service...");
 
 const app = express();
 const PORT = process.env.PORT || 8080;
-const CONFIG_ROOT = process.env.CONFIG_ROOT || "config/hwidx";
+const CONFIG_ROOT = process.env.CONFIG_ROOT || "config";
 const DEBUG = process.env.DEBUG || false;
 
 // Configure request logging via 'morgan'
@@ -51,7 +51,7 @@ app.get("/:prefix/:suffix", async (req, res, next) => {
   if (!fs.existsSync(dataPath)) {
     if (DEBUG)
       console.log(
-        `Cannot route request for hwidx://${org}/${suffix} -> ???`
+        `Cannot route request for hwidx://${org}/${suffix} -> ??? (file not found: ${dataPath})`
       );
     return res.sendStatus(404);
   }
