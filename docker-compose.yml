@@ -1,6 +1,6 @@
 services:
   hwidx-router:
-    build: .
+    image: ghcr.io/researchculture/hwidx-router:latest
     container_name: hwidx-router
     networks:
       - http
