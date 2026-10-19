@@ -36,8 +36,18 @@ function sanitizeInput(input) {
     return `${input}`.toLowerCase().replaceAll(/[/\\]/g, '');
 }
 
+// Health check (must be registered before the /:prefix route)
+app.get( "/status", (req, res) => {
+    return res.status(200).send('OK');
+});
+
+// Root requests go to the main site
+app.get("/", (req, res) => {
+  return res.redirect(302, "https://m.hwidx.org/");
+});
+
 // Prefix/Org level requests
-app.get("/:prefix", async (req, res, next) => {
+app.get("/:prefix",async (req, res, next) => {
   const org = sanitizeInput(req.params.prefix);
 
   // Minimally we need an org to route _anything_
@@ -131,10 +141,6 @@ function handleRequest(req, res, org, suffix, version) {
     return res.sendStatus(500);
   }
 }
-
-app.get( "/status", (req, res) => {
-    return res.status(200).send('OK');
-});
 
 app.use(async function(req, res){
     return res.status(404).send('Not Found');
