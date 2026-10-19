@@ -2,11 +2,17 @@ services:
   hwidx-router:
     build: .
     container_name: hwidx-router
+    networks:
+      - http
     ports:
       - "8080:8080/tcp"
     environment:
       - NODE_ENV=production
     volumes:
       #- ./config:/hwidx/config:ro
-      - ./hwidx:/hwidx/config:ro
+      - ../hwidx:/hwidx/config:ro
     restart: unless-stopped
+
+networks:
+  http:
+    external: true
