@@ -4,6 +4,8 @@ const morgan = require("morgan");
 const express = require("express");
 const rateLimit = require("express-rate-limit");
 const yaml = require("yaml");
+const createApi = require("./api");
+const createDataSync = require("./lib/data-sync");
 
 console.log("Starting hwidx-router service...");
 
@@ -11,9 +13,32 @@ const app = express();
 const PORT = process.env.PORT || 8080;
 const CONFIG_ROOT = process.env.CONFIG_ROOT || "config";
 const DEBUG = process.env.DEBUG || false;
+const CACHE_ROOT = process.env.CACHE_ROOT || "cache";
+const CACHE_CHECK_INTERVAL = parseInt(process.env.CACHE_CHECK_INTERVAL || "30", 10); // seconds; 0 disables
+const DATA_REPO = process.env.DATA_REPO ?? "https://github.com/ResearchCulture/hwidx.git"; // empty disables syncing
+const DATA_BRANCH = process.env.DATA_BRANCH || "main";
+const DATA_SYNC_INTERVAL = parseInt(process.env.DATA_SYNC_INTERVAL || "300", 10); // seconds; 0 clones but never pulls
+
+// Requests arrive via the front proxy and the website's nginx (both on private docker networks),
+// so take the client address from X-Forwarded-For, otherwise every visitor shares one rate limit bucket
+app.set("trust proxy", "loopback, linklocal, uniquelocal");
 
 // Configure request logging via 'morgan'
 app.use( morgan("tiny") );
+
+// Dataset API for the m.hwidx.org metapages. Every metapage view is one API call,
+// so this gets its own, looser limit ahead of the general one below
+const apiLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000, // 15 minutes
+    max: 1000, // limit each IP to 1000 requests per windowMs
+    standardHeaders: true,
+    legacyHeaders: false,
+});
+
+// The API is mounted here so it stays ahead of the routes below, but is only filled in
+// by start() once the dataset is in place, since building it reads the dataset
+const apiRoutes = express.Router();
+app.use("/api/v1", apiLimiter, apiRoutes);
 
 // Basic rate limiting to prevent abuse
 const limiter = rateLimit({
@@ -146,13 +171,32 @@ app.use(async function(req, res){
     return res.status(404).send('Not Found');
 });
 
-const server = app.listen(PORT, () => {
-  console.log(`hwidx-router service is running on port ${PORT}`);
-});
+let server = null;
+
+// Clone or update the dataset first, so nothing is served from an empty data folder on first start
+async function start() {
+  await createDataSync({
+    dataRoot: CONFIG_ROOT,
+    repo: DATA_REPO,
+    branch: DATA_BRANCH,
+    intervalMs: DATA_SYNC_INTERVAL * 1000,
+  }).start();
+
+  apiRoutes.use(createApi(CONFIG_ROOT, {
+    cacheRoot: CACHE_ROOT,
+    checkIntervalMs: CACHE_CHECK_INTERVAL * 1000,
+  }));
+
+  server = app.listen(PORT, () => {
+    console.log(`hwidx-router service is running on port ${PORT}`);
+  });
+}
+
+start();
 
 function gracefulClose() {
   console.log("hwidx-router stopping...");
-  server.close();
+  server?.close();
 
   console.log("hwidx-router stopped");
   process.exit( 0 );
