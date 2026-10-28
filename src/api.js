@@ -4,10 +4,11 @@ const createIndexCache = require("./lib/index-cache");
 const { currentVersionKeys } = require("./lib/versions");
 const catalog = require("./routes/catalog");
 const search = require("./routes/search");
+const popular = require("./routes/popular");
 const entry = require("./routes/entry");
 
-// The /api/v1 dataset API: wires the dataset and its index cache into the route handlers
-module.exports = function createApi(configRoot, { cacheRoot, checkIntervalMs }) {
+// The /api/v1 dataset API: wires the dataset, its index cache and the usage stats into the route handlers
+module.exports = function createApi(configRoot, { cacheRoot, checkIntervalMs, stats }) {
   const api = express.Router();
   const dataset = createDataset(configRoot);
 
@@ -40,10 +41,11 @@ module.exports = function createApi(configRoot, { cacheRoot, checkIntervalMs }) 
   });
 
   // Named endpoints come before the identifier catch-all, which reserves
-  // "catalog" and "search" (both already taken by m.hwidx.org pages)
+  // "catalog", "search" and "popular" (the first two already taken by m.hwidx.org pages)
   api.get("/catalog", catalog({ cache }));
   api.get("/search", search({ cache }));
-  api.get("/{*path}", entry({ dataset }));
+  api.get("/popular", popular({ dataset, stats }));
+  api.get("/{*path}", entry({ dataset, stats }));
 
   return api;
 };

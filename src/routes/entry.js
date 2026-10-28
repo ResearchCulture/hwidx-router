@@ -29,8 +29,9 @@ function versionsOf(dataset, segs) {
 
 // GET /<identifier>: one entry or directory, read live from the dataset (never from the cache),
 // with cascaded index.yml data. Directories also list their children with display names;
-// versioned entries say where they sit among their device's versions.
-module.exports = function entry({ dataset }) {
+// versioned entries say where they sit among their device's versions. Every record carries
+// its usage stats: how often the router redirected it, or sent visitors to its metapage.
+module.exports = function entry({ dataset, stats }) {
   return (req, res) => {
     const segs = (req.params.path ?? []).filter(Boolean).map((s) => s.toLowerCase());
     if (!segs.every((s) => SEGMENT.test(s)))
@@ -49,6 +50,7 @@ module.exports = function entry({ dataset }) {
         hwidx: `https://hwidx.org/${key}`,
         parent: segs.length > 1 ? segs.slice(0, -1).join("/") : null,
         data: found.data,
+        stats: stats.of(key),
       };
 
       if (found.type === "entry" && segs.length >= 3)

@@ -6,6 +6,8 @@ const rateLimit = require("express-rate-limit");
 const yaml = require("yaml");
 const createApi = require("./api");
 const createDataSync = require("./lib/data-sync");
+const createStats = require("./lib/stats");
+const { SEGMENT } = require("./lib/dataset");
 
 console.log("Starting hwidx-router service...");
 
@@ -18,6 +20,15 @@ const CACHE_CHECK_INTERVAL = parseInt(process.env.CACHE_CHECK_INTERVAL || "30", 
 const DATA_REPO = process.env.DATA_REPO ?? "https://github.com/ResearchCulture/hwidx.git"; // empty disables syncing
 const DATA_BRANCH = process.env.DATA_BRANCH || "main";
 const DATA_SYNC_INTERVAL = parseInt(process.env.DATA_SYNC_INTERVAL || "300", 10); // seconds; 0 clones but never pulls
+const STATS_SAVE_INTERVAL = parseInt(process.env.STATS_SAVE_INTERVAL || "60", 10); // seconds; 0 saves only on shutdown
+
+// Per-identifier counts of redirects and metapage visits, kept alongside the index cache
+const stats = createStats({ cacheRoot: CACHE_ROOT, saveIntervalMs: STATS_SAVE_INTERVAL * 1000 });
+
+// Only count well-formed identifiers, so paths like /1/.. that happen to resolve on disk never reach the stats
+function countable(route) {
+    return route.split("/").every((seg) => SEGMENT.test(seg));
+}
 
 // Requests arrive via the front proxy and the website's nginx (both on private docker networks),
 // so take the client address from X-Forwarded-For, otherwise every visitor shares one rate limit bucket
@@ -91,6 +102,8 @@ app.get("/:prefix",async (req, res, next) => {
     return res.sendStatus(404);
   }
 
+  if (countable(org))
+    stats.metapage(org);
   return res.redirect(302, webPath);
 
 });
@@ -135,6 +148,8 @@ function handleRequest(req, res, org, suffix, version) {
         console.log(
           `May have a metapage for hwidx://${route} routing to -> ${webPath}`
         );
+      if (countable(route))
+        stats.metapage(route);
       return res.redirect(302, `${webPath}`);
     }
     return res.sendStatus(404);
@@ -144,8 +159,11 @@ function handleRequest(req, res, org, suffix, version) {
     const data = yaml.parse(fs.readFileSync(dataPath, "utf8"));
     if (data === null || data === undefined) return res.sendStatus(500);
 
-    if( data.status && data.status.toLowerCase() == "pending" )
+    if( data.status && data.status.toLowerCase() == "pending" ) {
+      if (countable(route))
+        stats.metapage(route);
       return res.redirect(302, webPath);
+    }
 
     const redirect = data.url || null;
     if (redirect !== null) {
@@ -153,6 +171,8 @@ function handleRequest(req, res, org, suffix, version) {
         console.log(
           `Routing request for hwidx://${route} -> ${dataPath} -> ${redirect}`
         );
+      if (countable(route))
+        stats.redirect(route);
       return res.redirect(302, redirect);
     }
 
@@ -160,6 +180,8 @@ function handleRequest(req, res, org, suffix, version) {
       console.log(
         `Routing request for hwidx://${route} -> ${dataPath} -> ${webPath}`
       );
+    if (countable(route))
+      stats.metapage(route);
     return res.redirect(302, webPath);
   } catch (err) {
     console.error(`Error reading file at ${dataPath}:`, err);
@@ -185,6 +207,7 @@ async function start() {
   apiRoutes.use(createApi(CONFIG_ROOT, {
     cacheRoot: CACHE_ROOT,
     checkIntervalMs: CACHE_CHECK_INTERVAL * 1000,
+    stats,
   }));
 
   server = app.listen(PORT, () => {
@@ -197,6 +220,7 @@ start();
 function gracefulClose() {
   console.log("hwidx-router stopping...");
   server?.close();
+  stats.save();
 
   console.log("hwidx-router stopped");
   process.exit( 0 );
