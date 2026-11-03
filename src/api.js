@@ -8,7 +8,7 @@ const popular = require("./routes/popular");
 const entry = require("./routes/entry");
 
 // The /api/v1 dataset API: wires the dataset, its index cache and the usage stats into the route handlers
-module.exports = function createApi(configRoot, { cacheRoot, checkIntervalMs, linkCheckHours, stats }) {
+module.exports = function createApi(configRoot, { cacheRoot, checkIntervalMs, linkCheck, stats }) {
   const api = express.Router();
   const dataset = createDataset(configRoot);
 
@@ -45,7 +45,7 @@ module.exports = function createApi(configRoot, { cacheRoot, checkIntervalMs, li
   api.get("/catalog", catalog({ cache }));
   api.get("/search", search({ cache }));
   api.get("/popular", popular({ dataset, stats }));
-  api.get("/{*path}", entry({ dataset, stats, linkCheckHours }));
+  api.get("/{*path}", entry({ dataset, stats, linkCheck }));
 
   return api;
 };

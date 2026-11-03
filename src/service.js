@@ -244,7 +244,7 @@ async function start() {
 
   apiRoutes.use(createApi(CONFIG_ROOT, {
     cacheRoot: CACHE_ROOT,
-    linkCheckHours: LINK_CHECK_HOURS,
+    linkCheck,
     checkIntervalMs: CACHE_CHECK_INTERVAL * 1000,
     stats,
   }));

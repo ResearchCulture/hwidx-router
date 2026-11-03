@@ -108,7 +108,24 @@ module.exports = function createLinkCheck({ cacheRoot, maxAgeMs, timeoutMs, debu
     return link.up;
   }
 
-  return { resolves, save };
+  // What the last check found for `key`, without probing anything (so reading it never causes a request to
+  // someone else's site): null when checking is off, otherwise { everyHours, up, status, checkedAt } where
+  // up is null if this link hasn't been checked yet
+  function state(key, url) {
+    if (maxAgeMs <= 0)
+      return null;
+
+    const link = links.get(key);
+    const checked = link !== undefined && link.url === url && link.checkedAt !== null;
+    return {
+      everyHours: maxAgeMs / 3600000,
+      up: checked ? link.up : null,
+      status: checked ? link.status : null,
+      checkedAt: checked ? new Date(link.checkedAt).toISOString() : null,
+    };
+  }
+
+  return { resolves, state, save };
 };
 
 module.exports.USER_AGENT = USER_AGENT;
