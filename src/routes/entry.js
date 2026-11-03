@@ -30,8 +30,9 @@ function versionsOf(dataset, segs) {
 // GET /<identifier>: one entry or directory, read live from the dataset (never from the cache),
 // with cascaded index.yml data. Directories also list their children with display names;
 // versioned entries say where they sit among their device's versions. Every record carries
-// its usage stats: how often the router redirected it, or sent visitors to its metapage.
-module.exports = function entry({ dataset, stats }) {
+// its usage stats: how often the router redirected it, or sent visitors to its metapage. Entries also say
+// how often the router rechecks their link (linkCheckHours, null when checking is off).
+module.exports = function entry({ dataset, stats, linkCheckHours }) {
   return (req, res) => {
     const segs = (req.params.path ?? []).filter(Boolean).map((s) => s.toLowerCase());
     if (!segs.every((s) => SEGMENT.test(s)))
@@ -52,6 +53,9 @@ module.exports = function entry({ dataset, stats }) {
         data: found.data,
         stats: stats.of(key),
       };
+
+      if (found.type === "entry")
+        record.linkCheckHours = linkCheckHours > 0 ? linkCheckHours : null;
 
       if (found.type === "entry" && segs.length >= 3)
         record.versions = versionsOf(dataset, segs);

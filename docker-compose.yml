@@ -11,6 +11,8 @@ services:
     volumes:
       #- ./config:/hwidx/config:ro
       - ../hwidx:/hwidx/config:ro
+      # Index cache, usage stats and link check state, kept between restarts
+      - ${HWIDX_CACHE_PATH:-./cache}:/hwidx/cache
     restart: unless-stopped
 
 networks:
