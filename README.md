@@ -128,4 +128,4 @@ A GitHub Actions workflow publishes the image to `ghcr.io` on every push to `mai
 
 ## License
 
-MIT
+MIT, see [LICENSE](LICENSE).
