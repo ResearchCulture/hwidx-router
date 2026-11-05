@@ -99,6 +99,14 @@ app.set("trust proxy", "loopback, linklocal, uniquelocal");
 // Configure request logging via 'morgan'
 app.use( morgan("tiny") );
 
+// Everything the router answers is a redirect or API data, never a page worth listing in search results: the
+// destination (or the metapage on m.hwidx.org) should be what gets indexed. `noindex` only, so crawlers still
+// follow redirects to their targets. Set here, ahead of the limiters, so that 429s carry it too.
+app.use((req, res, next) => {
+    res.set("X-Robots-Tag", "noindex");
+    next();
+});
+
 // With DEBUG, also log each request as it arrives and a detailed line once its response has gone out
 if (DEBUG) {
     app.use((req, res, next) => {
@@ -148,6 +156,32 @@ const apiLimiter = rateLimit({
 // by start() once the dataset is in place, since building it reads the dataset
 const apiRoutes = express.Router();
 app.use("/api/v1", analytics.api({ skip: fromSite }), apiLimiter, apiRoutes);
+
+// Crawlers are welcome to follow the redirects, but have no use for the API. Registered ahead of the
+// general limiter (and the /:prefix route) so a crawler's first request neither counts against its limit nor
+// is mistaken for an identifier.
+app.get("/robots.txt", (req, res) => {
+    res.type("text/plain").set("Cache-Control", "public, max-age=86400");
+    return res.status(200).send("User-agent: *\nDisallow: /api/\n");
+});
+
+// Where to report problems with the router (RFC 9116). The same text is served by the website at m.hwidx.org,
+// so the Expires date needs renewing in both places. Registered ahead of the limiter and the /:prefix/:suffix
+// route, which would otherwise treat .well-known/security.txt as an identifier.
+const SECURITY_TXT = [
+    "# Security and abuse reports for hwidx.org (RFC 9116). Issues on GitHub are public.",
+    "Contact: https://github.com/ResearchCulture/hwidx/issues",
+    "Expires: 2027-11-05T00:00:00.000Z",
+    "Preferred-Languages: en",
+    "Canonical: https://hwidx.org/.well-known/security.txt",
+    "Canonical: https://m.hwidx.org/.well-known/security.txt",
+    "",
+].join("\n");
+
+app.get("/.well-known/security.txt", (req, res) => {
+    res.type("text/plain").set("Cache-Control", "public, max-age=86400");
+    return res.status(200).send(SECURITY_TXT);
+});
 
 // Basic rate limiting to prevent abuse
 const limiter = rateLimit({
