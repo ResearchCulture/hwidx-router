@@ -8,6 +8,10 @@ services:
       - "8080:8080/tcp"
     environment:
       - NODE_ENV=production
+      # Simple Analytics website to report redirects and API calls to; leave empty to disable
+      - SA_HOSTNAME=${SA_HOSTNAME:-}
+      # Most posts to Simple Analytics outstanding at once; events past this are dropped
+      - SA_MAX_IN_FLIGHT=${SA_MAX_IN_FLIGHT:-16}
     volumes:
       #- ./config:/hwidx/config:ro
       - ../hwidx:/hwidx/config:ro

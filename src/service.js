@@ -8,24 +8,42 @@ const createApi = require("./api");
 const createDataSync = require("./lib/data-sync");
 const createStats = require("./lib/stats");
 const createLinkCheck = require("./lib/link-check");
+const createAnalytics = require("./lib/analytics");
 const { SEGMENT } = require("./lib/dataset");
 
 console.log("Starting hwidx-router service...");
+
+// Read a whole base-10 number from the environment. Unset or blank gives the default silently; anything
+// malformed, or below min, warns and gives the default too
+function envInt(name, fallback, min = 0) {
+    const raw = process.env[name];
+    if (raw === undefined || raw.trim() === "")
+        return fallback;
+    const text = raw.trim();
+    const value = /^[+-]?\d+$/.test(text) ? parseInt(text, 10) : NaN;
+    if (!Number.isSafeInteger(value) || value < min) {
+        console.warn(`warning: ${name} must be a whole number of at least ${min} (got "${raw}"), using ${fallback}`);
+        return fallback;
+    }
+    return value;
+}
 
 const app = express();
 const PORT = process.env.PORT || 8080;
 const CONFIG_ROOT = process.env.CONFIG_ROOT || "config";
 const DEBUG = process.env.DEBUG || false;
 const CACHE_ROOT = process.env.CACHE_ROOT || "cache";
-const CACHE_CHECK_INTERVAL = parseInt(process.env.CACHE_CHECK_INTERVAL || "30", 10); // seconds; 0 disables
+const CACHE_CHECK_INTERVAL = envInt("CACHE_CHECK_INTERVAL", 30); // seconds; 0 disables
 const DATA_REPO = process.env.DATA_REPO ?? "https://github.com/ResearchCulture/hwidx.git"; // empty disables syncing
 const DATA_BRANCH = process.env.DATA_BRANCH || "main";
-const DATA_SYNC_INTERVAL = parseInt(process.env.DATA_SYNC_INTERVAL || "300", 10); // seconds; 0 clones but never pulls
-const API_RATE_LIMIT = parseInt(process.env.API_RATE_LIMIT || "300", 10); // API requests per IP per 15 minutes from outside the site; 0 removes the limit
+const DATA_SYNC_INTERVAL = envInt("DATA_SYNC_INTERVAL", 300); // seconds; 0 clones but never pulls
+const API_RATE_LIMIT = envInt("API_RATE_LIMIT", 300); // API requests per IP per 15 minutes from outside the site; 0 removes the limit
 const SITE_HOSTS = (process.env.SITE_HOSTS || "hwidx.org,m.hwidx.org").split(",").map((host) => host.trim().toLowerCase()).filter(Boolean); // hosts whose pages count as hwidx.org's own traffic
-const STATS_SAVE_INTERVAL = parseInt(process.env.STATS_SAVE_INTERVAL || "60", 10); // seconds; 0 saves only on shutdown
+const STATS_SAVE_INTERVAL = envInt("STATS_SAVE_INTERVAL", 60); // seconds; 0 saves only on shutdown
 const LINK_CHECK_HOURS = parseFloat(process.env.LINK_CHECK_HOURS || "24"); // how long a link check stays fresh; 0 disables
-const LINK_CHECK_TIMEOUT = parseInt(process.env.LINK_CHECK_TIMEOUT || "5", 10); // seconds to wait for a target to answer
+const LINK_CHECK_TIMEOUT = envInt("LINK_CHECK_TIMEOUT", 5); // seconds to wait for a target to answer
+const SA_HOSTNAME = (process.env.SA_HOSTNAME || "").trim(); // Simple Analytics website to report usage to; empty disables
+const SA_MAX_IN_FLIGHT = envInt("SA_MAX_IN_FLIGHT", 16, 1); // posts to Simple Analytics outstanding at once; events past this are dropped
 
 // Per-identifier counts of redirects and metapage visits, kept alongside the index cache
 const stats = createStats({ cacheRoot: CACHE_ROOT, saveIntervalMs: STATS_SAVE_INTERVAL * 1000 });
@@ -33,9 +51,25 @@ const stats = createStats({ cacheRoot: CACHE_ROOT, saveIntervalMs: STATS_SAVE_IN
 // Redirect targets are rechecked once their last check is stale, and visitors are sent to the metapage while one is down
 const linkCheck = createLinkCheck({ cacheRoot: CACHE_ROOT, maxAgeMs: LINK_CHECK_HOURS * 3600 * 1000, timeoutMs: LINK_CHECK_TIMEOUT * 1000, debug: DEBUG });
 
+// Usage also reported to Simple Analytics as events, when SA_HOSTNAME is set
+const analytics = createAnalytics({ hostname: SA_HOSTNAME, maxInFlight: SA_MAX_IN_FLIGHT, debug: DEBUG });
+
 // Only count well-formed identifiers, so paths like /1/.. that happen to resolve on disk never reach the stats
 function countable(route) {
     return route.split("/").every((seg) => SEGMENT.test(seg));
+}
+
+// Record a redirect or metapage visit in the local stats and, if enabled, in Simple Analytics
+function count(req, kind, route, reason) {
+    if (!countable(route))
+        return;
+    if (kind === "redirect") {
+        stats.redirect(route);
+        analytics.redirect(req, route);
+    } else {
+        stats.metapage(route);
+        analytics.metapage(req, route, reason);
+    }
 }
 
 // Requests arrive via the front proxy and the website's nginx (both on private docker networks),
@@ -79,7 +113,7 @@ const apiLimiter = rateLimit({
 // The API is mounted here so it stays ahead of the routes below, but is only filled in
 // by start() once the dataset is in place, since building it reads the dataset
 const apiRoutes = express.Router();
-app.use("/api/v1", apiLimiter, apiRoutes);
+app.use("/api/v1", analytics.api({ skip: fromSite }), apiLimiter, apiRoutes);
 
 // Basic rate limiting to prevent abuse
 const limiter = rateLimit({
@@ -132,8 +166,7 @@ app.get("/:prefix",async (req, res, next) => {
     return res.sendStatus(404);
   }
 
-  if (countable(org))
-    stats.metapage(org);
+  count(req, "metapage", org, "org");
   return res.redirect(302, webPath);
 
 });
@@ -178,8 +211,7 @@ async function handleRequest(req, res, org, suffix, version) {
         console.log(
           `May have a metapage for hwidx://${route} routing to -> ${webPath}`
         );
-      if (countable(route))
-        stats.metapage(route);
+      count(req, "metapage", route, "directory");
       return res.redirect(302, `${webPath}`);
     }
     return res.sendStatus(404);
@@ -190,8 +222,7 @@ async function handleRequest(req, res, org, suffix, version) {
     if (data === null || data === undefined) return res.sendStatus(500);
 
     if( data.status && data.status.toLowerCase() == "pending" ) {
-      if (countable(route))
-        stats.metapage(route);
+      count(req, "metapage", route, "pending");
       return res.redirect(302, webPath);
     }
 
@@ -199,8 +230,7 @@ async function handleRequest(req, res, org, suffix, version) {
     if (redirect !== null && !(await linkCheck.resolves(route, redirect))) {
       if (DEBUG)
         console.log(`Target for hwidx://${route} -> ${redirect} is not resolving, routing to -> ${webPath}`);
-      if (countable(route))
-        stats.metapage(route);
+      count(req, "metapage", route, "link-down");
       return res.redirect(302, `${webPath}?reason=link-down`); // the metapage explains why the visitor is here
     }
 
@@ -209,8 +239,7 @@ async function handleRequest(req, res, org, suffix, version) {
         console.log(
           `Routing request for hwidx://${route} -> ${dataPath} -> ${redirect}`
         );
-      if (countable(route))
-        stats.redirect(route);
+      count(req, "redirect", route);
       return res.redirect(302, redirect);
     }
 
@@ -218,8 +247,7 @@ async function handleRequest(req, res, org, suffix, version) {
       console.log(
         `Routing request for hwidx://${route} -> ${dataPath} -> ${webPath}`
       );
-    if (countable(route))
-      stats.metapage(route);
+    count(req, "metapage", route, "no-url");
     return res.redirect(302, webPath);
   } catch (err) {
     console.error(`Error reading file at ${dataPath}:`, err);
