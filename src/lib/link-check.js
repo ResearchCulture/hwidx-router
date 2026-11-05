@@ -92,8 +92,11 @@ module.exports = function createLinkCheck({ cacheRoot, maxAgeMs, timeoutMs, debu
   // Whether to go ahead and redirect to `url` for `key` (true), or send the visitor to the metapage instead (false).
   // Checks the link first if its last check is stale.
   async function resolves(key, url) {
-    if (maxAgeMs <= 0)
+    if (maxAgeMs <= 0) {
+      if (debug)
+        console.log(`Link check hwidx://${key}: checking is disabled, assuming ${url} is up`);
       return true;
+    }
 
     let link = links.get(key);
     if (link === undefined || link.url !== url) { // a new entry, or one whose url was edited
@@ -101,8 +104,13 @@ module.exports = function createLinkCheck({ cacheRoot, maxAgeMs, timeoutMs, debu
       links.set(key, link);
     }
 
-    if (link.pending === null && (link.checkedAt === null || now() - link.checkedAt >= maxAgeMs))
+    if (link.pending === null && (link.checkedAt === null || now() - link.checkedAt >= maxAgeMs)) {
+      if (debug)
+        console.log(`Link check hwidx://${key}: ${link.checkedAt === null ? "never checked" : "last check is stale"}, probing ${url}`);
       link.pending = check(key, link).finally(() => { link.pending = null; });
+    } else if (debug) {
+      console.log(`Link check hwidx://${key}: ${link.pending !== null ? "waiting for a probe already running" : `using the saved result from ${new Date(link.checkedAt).toISOString()}`} (${link.up ? "up" : "down"})`);
+    }
 
     await link.pending;
     return link.up;

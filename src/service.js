@@ -28,10 +28,25 @@ function envInt(name, fallback, min = 0) {
     return value;
 }
 
+// Read a boolean from the environment: true/1/yes/on or false/0/no/off, any case. Unset or blank gives the
+// default silently; anything else warns and gives the default too
+function envBool(name, fallback) {
+    const raw = process.env[name];
+    if (raw === undefined || raw.trim() === "")
+        return fallback;
+    const text = raw.trim().toLowerCase();
+    if (["true", "1", "yes", "on"].includes(text))
+        return true;
+    if (["false", "0", "no", "off"].includes(text))
+        return false;
+    console.warn(`warning: ${name} must be true or false (got "${raw}"), using ${fallback}`);
+    return fallback;
+}
+
 const app = express();
 const PORT = process.env.PORT || 8080;
 const CONFIG_ROOT = process.env.CONFIG_ROOT || "config";
-const DEBUG = process.env.DEBUG || false;
+const DEBUG = envBool("DEBUG", false); // log every request and what is done for it, including Simple Analytics and link check traffic
 const CACHE_ROOT = process.env.CACHE_ROOT || "cache";
 const CACHE_CHECK_INTERVAL = envInt("CACHE_CHECK_INTERVAL", 30); // seconds; 0 disables
 const DATA_REPO = process.env.DATA_REPO ?? "https://github.com/ResearchCulture/hwidx.git"; // empty disables syncing
@@ -61,8 +76,13 @@ function countable(route) {
 
 // Record a redirect or metapage visit in the local stats and, if enabled, in Simple Analytics
 function count(req, kind, route, reason) {
-    if (!countable(route))
+    if (!countable(route)) {
+        if (DEBUG)
+            console.log(`Not counting ${kind} for hwidx://${route}: not a well-formed identifier`);
         return;
+    }
+    if (DEBUG)
+        console.log(`Counting ${kind} for hwidx://${route}${reason ? ` (${reason})` : ""} in local stats${SA_HOSTNAME ? " and Simple Analytics" : ""}`);
     if (kind === "redirect") {
         stats.redirect(route);
         analytics.redirect(req, route);
@@ -78,6 +98,20 @@ app.set("trust proxy", "loopback, linklocal, uniquelocal");
 
 // Configure request logging via 'morgan'
 app.use( morgan("tiny") );
+
+// With DEBUG, also log each request as it arrives and a detailed line once its response has gone out
+if (DEBUG) {
+    app.use((req, res, next) => {
+        const started = process.hrtime.bigint();
+        console.log(`Request: ${req.method} ${req.originalUrl} from ${req.ip} (ua: ${req.get("user-agent") || "none"}, referer: ${req.get("referer") || "none"}, sec-fetch-site: ${req.get("sec-fetch-site") || "none"})`);
+        res.on("finish", () => {
+            const ms = Number(process.hrtime.bigint() - started) / 1e6;
+            const location = res.getHeader("location");
+            console.log(`Response: ${req.method} ${req.originalUrl} -> ${res.statusCode}${location ? ` ${location}` : ""} in ${ms.toFixed(1)}ms`);
+        });
+        next();
+    });
+}
 
 // Whether an API request comes from the site's own pages (the metapages, search and catalog fetching their data),
 // as opposed to someone using the API directly. Browsers state this themselves: Sec-Fetch-Site can't be set by

@@ -25,12 +25,17 @@ module.exports = function createAnalytics({ hostname, maxInFlight = DEFAULT_MAX_
   let dropped = 0;
 
   function send(req, event, path, metadata) {
-    if (!enabled)
+    if (!enabled) {
+      if (debug)
+        console.log(`Simple Analytics: disabled (SA_HOSTNAME not set), not sending ${event} for ${path}`);
       return;
+    }
 
     // Too many posts outstanding: forget this one
     if (inFlight >= maxInFlight) {
       dropped += 1;
+      if (debug)
+        console.log(`Simple Analytics: ${maxInFlight} posts in flight, dropping ${event} for ${path}`);
       return;
     }
 
@@ -46,10 +51,15 @@ module.exports = function createAnalytics({ hostname, maxInFlight = DEFAULT_MAX_
 
     // Counted now so the limit holds, but only started once the current handler has sent its response
     inFlight += 1;
+    if (debug)
+      console.log(`Simple Analytics: queued ${event} for ${path} ${JSON.stringify(metadata)} (${inFlight} in flight)`);
     setImmediate(() => post(body));
   }
 
   function post(body) {
+    const started = Date.now();
+    if (debug)
+      console.log(`Simple Analytics: posting ${body.event} for ${body.path} to ${ENDPOINT}`);
     fetch(ENDPOINT, {
       method: "POST",
       headers: { "Content-Type": "application/json", "User-Agent": body.ua },
@@ -57,6 +67,8 @@ module.exports = function createAnalytics({ hostname, maxInFlight = DEFAULT_MAX_
       signal: AbortSignal.timeout(timeoutMs),
     })
       .then((res) => {
+        if (debug && res.ok)
+          console.log(`Simple Analytics: accepted ${body.event} for ${body.path}: HTTP ${res.status} in ${Date.now() - started}ms`);
         if (debug && !res.ok)
           console.log(`Simple Analytics rejected ${body.event} for ${body.path}: HTTP ${res.status}`);
       })
@@ -81,6 +93,8 @@ module.exports = function createAnalytics({ hostname, maxInFlight = DEFAULT_MAX_
     // (including 429s from the rate limiter, as long as this sits ahead of it). `skip` leaves out the
     // site's own calls, which its page views already cover.
     api: ({ skip = () => false } = {}) => (req, res, next) => {
+      if (debug && enabled && skip(req))
+        console.log(`Simple Analytics: not reporting ${req.method} /api/v1${req.path}, it comes from the site's own pages`);
       if (enabled && !skip(req)) {
         res.on("finish", () => {
           // First path segment only: "catalog", "search", "popular", or "entry" for identifier lookups

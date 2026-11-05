@@ -86,12 +86,12 @@ DATA_REPO= CONFIG_ROOT=../../hwidx DEBUG=1 node service.js
 
 ## Configuration
 
-Everything is set through environment variables. Whole-number settings that are malformed (or below their minimum) log a warning and use the default.
+Everything is set through environment variables. Whole-number settings that are malformed (or below their minimum), and booleans that are not `true` or `false`, log a warning and use the default.
 
 | Variable | Default | Description |
 | --- | --- | --- |
 | `PORT` | `8080` | Port to listen on. |
-| `DEBUG` | off | Set to anything to log routing decisions. |
+| `DEBUG` | `false` | `true` (or `1`, `yes`, `on`) logs each request and what is done for it in detail: routing decisions, stats counting, link check probes, and every Simple Analytics event queued, posted, accepted, rejected or dropped. |
 | `CONFIG_ROOT` | `config` | Folder holding the dataset. |
 | `CACHE_ROOT` | `cache` | Folder for the index cache, stats and link check state. |
 | `DATA_REPO` | the hwidx dataset on GitHub | Git repository to clone into `CONFIG_ROOT`. Set empty to disable syncing. |
